@@ -8,7 +8,7 @@ require 'English'
 module Rack
   module Session
     # Rack::Session::Dalli provides memcached based session management.
-    class Dalli < Abstract::Persisted
+    class Dalli < Abstract::PersistedSecure
       attr_reader :pool
 
       # Don't freeze this until we fix the specs/implementation
@@ -78,7 +78,7 @@ module Rack
         super
 
         # Determine the default TTL for newly-created sessions
-        @default_ttl = ttl @default_options[:expire_after]
+        @default_ttl = ttl(@default_options[:expire_after])
 
         # Normalize and validate passed options
         mserv, mopts, popts = extract_dalli_options(options)
@@ -87,49 +87,62 @@ module Rack
       end
 
       def get_session(_env, sid)
-        with_block([nil, {}]) do |dc|
-          unless sid && !sid.empty? && (session = dc.get(sid))
-            old_sid = sid
-            sid = generate_sid_with(dc)
-            session = {}
-            unless dc.add(sid, session, @default_ttl)
-              sid = old_sid
-              redo # generate a new sid and try again
-            end
-          end
-          [sid, session]
+        with_dalli_client([nil, {}]) do |dc|
+          existing_session = existing_session_for_sid(dc, sid)
+          return [sid, existing_session] unless existing_session.nil?
+
+          [create_sid_with_empty_session(dc), {}]
         end
       end
 
       def set_session(_env, session_id, new_session, options)
         return false unless session_id
 
-        with_block(false) do |dc|
-          dc.set(session_id, new_session, ttl(options[:expire_after]))
+        with_dalli_client(false) do |dc|
+          dc.set(memcached_key_from_sid(session_id), new_session, ttl(options[:expire_after]))
           session_id
         end
       end
 
       def destroy_session(_env, session_id, options)
-        with_block do |dc|
-          dc.delete(session_id)
+        with_dalli_client do |dc|
+          dc.delete(memcached_key_from_sid(session_id))
           generate_sid_with(dc) unless options[:drop]
         end
       end
 
       def find_session(req, sid)
-        get_session req.env, sid
+        get_session(req.env, sid)
       end
 
       def write_session(req, sid, session, options)
-        set_session req.env, sid, session, options
+        set_session(req.env, sid, session, options)
       end
 
       def delete_session(req, sid, options)
-        destroy_session req.env, sid, options
+        destroy_session(req.env, sid, options)
       end
 
       private
+
+      def memcached_key_from_sid(sid)
+        return sid.private_id if sid.respond_to?(:private_id)
+
+        sid
+      end
+
+      def existing_session_for_sid(client, sid)
+        return nil unless sid && !sid.empty?
+
+        client.get(memcached_key_from_sid(sid))
+      end
+
+      def create_sid_with_empty_session(client)
+        loop do
+          sid = generate_sid_with(client)
+          break sid if client.add(memcached_key_from_sid(sid), {}, @default_ttl)
+        end
+      end
 
       def extract_dalli_options(options)
         raise 'Rack::Session::Dalli no longer supports the :cache option.' if options[:cache]
@@ -144,6 +157,9 @@ module Rack
         if mopts[:pool_size] || mopts[:pool_timeout]
           popts[:size] = mopts.delete :pool_size if mopts[:pool_size]
           popts[:timeout] = mopts.delete :pool_timeout if mopts[:pool_timeout]
+
+          # TODO: This looks like it should be false, since we're using this
+          # in a pool
           mopts[:threadsafe] = true
         end
 
@@ -157,7 +173,7 @@ module Rack
         end
       end
 
-      def with_block(default = nil, &block)
+      def with_dalli_client(result_on_error = nil, &block)
         @pool.with(&block)
       rescue ::Dalli::DalliError, Errno::ECONNREFUSED
         raise if /undefined class/.match?($ERROR_INFO.message)
@@ -166,7 +182,7 @@ module Rack
           warn "#{self} is unable to find memcached server."
           warn $ERROR_INFO.inspect
         end
-        default
+        result_on_error
       end
 
       def ttl(expire_after)

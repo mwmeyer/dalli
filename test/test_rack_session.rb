@@ -2,6 +2,7 @@
 
 require_relative 'helper'
 
+require 'json'
 require 'rack/session/dalli'
 require 'rack/lint'
 require 'rack/mock'
@@ -290,17 +291,21 @@ describe Rack::Session::Dalli do
         session.update :a => :b, :c => { d: :e },
                        :f => { g: { h: :i } }, 'test' => true
       end
-      [200, {}, [session.inspect]]
+      [200, {}, [session.to_h.to_json]]
     end
     rsd = Rack::Session::Dalli.new(hash_check)
     req = Rack::MockRequest.new(rsd)
 
     res0 = req.get('/')
-    session_id = (cookie = res0['Set-Cookie'])[session_match, 1]
-    ses0 = rsd.pool.with { |c| c.get(session_id, true) }
+    cookie = res0['Set-Cookie']
+    ses0 = JSON.parse(res0.body)
+    refute_nil ses0
+    assert_equal '{"a"=>"b", "c"=>{"d"=>"e"}, "f"=>{"g"=>{"h"=>"i"}}, "test"=>true}', ses0.to_s
 
-    req.get('/', 'HTTP_COOKIE' => cookie)
-    ses1 = rsd.pool.with { |c| c.get(session_id, true) }
+    res1 = req.get('/', 'HTTP_COOKIE' => cookie)
+    ses1 = JSON.parse(res1.body)
+    refute_nil ses1
+    assert_equal '{"a"=>"b", "c"=>{"d"=>"e"}, "f"=>{"g"=>{"h"=>"j"}}, "test"=>true}', ses1.to_s
 
     refute_equal ses0, ses1
   end
