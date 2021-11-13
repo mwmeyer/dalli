@@ -148,22 +148,25 @@ module Rack
         raise 'Rack::Session::Dalli no longer supports the :cache option.' if options[:cache]
 
         # Filter out Rack::Session-specific options and apply our defaults
-        # Filter out Rack::Session-specific options and apply our defaults
         filtered_opts = options.reject { |k, _| DEFAULT_OPTIONS.key? k }
         mopts = DEFAULT_DALLI_OPTIONS.merge(filtered_opts)
         mserv = mopts.delete :memcache_server
 
-        popts = {}
-        if mopts[:pool_size] || mopts[:pool_timeout]
-          popts[:size] = mopts.delete :pool_size if mopts[:pool_size]
-          popts[:timeout] = mopts.delete :pool_timeout if mopts[:pool_timeout]
-
-          # TODO: This looks like it should be false, since we're using this
-          # in a pool
-          mopts[:threadsafe] = true
-        end
-
+        popts = pool_options(mopts)
         [mserv, mopts, popts]
+      end
+
+      def pool_options(client_options)
+        return {} unless client_options[:pool_size] || client_options[:pool_timeout]
+
+        pool_opts = {}
+        pool_opts[:size] = client_options.delete(:pool_size) if client_options[:pool_size]
+        pool_opts[:timeout] = client_options.delete(:pool_timeout) if client_options[:pool_timeout]
+
+        # Set to false, since there is a connection pool to enforce access
+        client_options[:threadsafe] = false
+
+        pool_opts
       end
 
       def generate_sid_with(client)
