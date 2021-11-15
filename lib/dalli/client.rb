@@ -384,29 +384,22 @@ module Dalli
     end
 
     # Chokepoint method for instrumentation
-    def perform(*all_args)
-      return yield if block_given?
-
-      op, key, *args = all_args
-
-      key = key.to_s
-      key = @key_manager.validate_key(key)
+    def perform(opcode, key, *args)
+      key = @key_manager.validate_key(key.to_s)
 
       server = ring.server_for_key(key)
-      server.request(op, key, *args)
+      server.request(opcode, key, *args)
     rescue NetworkError => e
       Dalli.logger.debug { e.inspect }
-      Dalli.logger.debug { 'retrying request with new server' }
+      Dalli.logger.debug { "retrying request for #{key} with new server" }
       retry
     end
 
     def normalize_options(opts)
-      begin
-        opts[:expires_in] = opts[:expires_in].to_i if opts[:expires_in]
-      rescue NoMethodError
-        raise ArgumentError, "cannot convert :expires_in => #{opts[:expires_in].inspect} to an integer"
-      end
+      opts[:expires_in] = opts[:expires_in].to_i if opts[:expires_in]
       opts
+    rescue NoMethodError
+      raise ArgumentError, "cannot convert :expires_in => #{opts[:expires_in].inspect} to an integer"
     end
 
     # TODO: Look at extracting below into separate MultiYielder class
