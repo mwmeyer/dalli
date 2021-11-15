@@ -110,14 +110,16 @@ module Rack
       def create_sid_with_empty_session(client)
         loop do
           sid = generate_sid_with(client)
+
           break sid if client.add(memcached_key_from_sid(sid), {}, @default_ttl)
         end
       end
 
       def generate_sid_with(client)
         loop do
-          sid = generate_sid
-          break sid unless client.get(sid)
+          raw_sid = generate_sid
+          sid = raw_sid.is_a?(String) ? Rack::Session::SessionId.new(raw_sid) : raw_sid
+          break sid unless client.get(memcached_key_from_sid(sid))
         end
       end
 
