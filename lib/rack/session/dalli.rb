@@ -32,25 +32,14 @@ module Rack
       # ENV['MEMCACHE_SERVERS'] and use that value if it is available, or fall
       # back to the same default behavior described above.
       #
-      # Rack::Session::Dalli is intended to be a drop-in replacement for
-      # Rack::Session::Memcache. It accepts additional options that control the
-      # behavior of Rack::Session, Dalli::Client, and an optional
-      # ConnectionPool. First and foremost, if you wish to instantiate your own
-      # Dalli::Client (or ConnectionPool) and use that instead of letting
-      # Rack::Session::Dalli instantiate it on your behalf, simply pass it in
-      # as the `:cache` option. Please note that you will be responsible for
-      # setting the namespace and any other options on Dalli::Client.
+      # Rack::Session::Dalli accepts the same options as Dalli::Client, so
+      # it's worth reviewing its documentation. Perhaps most importantly,
+      # if you don't specify a `:namespace` option, Rack::Session::Dalli
+      # will default to using 'rack:session'.
       #
-      # Secondly, if you're not using the `:cache` option, Rack::Session::Dalli
-      # accepts the same options as Dalli::Client, so it's worth reviewing its
-      # documentation. Perhaps most importantly, if you don't specify a
-      # `:namespace` option, Rack::Session::Dalli will default to using
-      # "rack:session".
-      #
-      # Whether you are using the `:cache` option or not, it is not recommend
-      # to set `:expires_in`. Instead, use `:expire_after`, which will control
-      # both the expiration of the client cookie as well as the expiration of
-      # the corresponding entry in memcached.
+      # It is not recommended to set `:expires_in`. Instead, use `:expire_after`,
+      # which will control both the expiration of the client cookie as well
+      # as the expiration of the corresponding entry in memcached.
       #
       # Rack::Session::Dalli also accepts a host of options that control how
       # the sessions and session cookies are managed, including the
@@ -81,7 +70,7 @@ module Rack
         @data = build_data_source(options)
       end
 
-      def get_session(_env, sid)
+      def find_session(_req, sid)
         with_dalli_client([nil, {}]) do |dc|
           existing_session = existing_session_for_sid(dc, sid)
           return [sid, existing_session] unless existing_session.nil?
@@ -90,32 +79,20 @@ module Rack
         end
       end
 
-      def set_session(_env, session_id, new_session, options)
-        return false unless session_id
+      def write_session(_req, sid, session, options)
+        return false unless sid
 
         with_dalli_client(false) do |dc|
-          dc.set(memcached_key_from_sid(session_id), new_session, ttl(options[:expire_after]))
-          session_id
+          dc.set(memcached_key_from_sid(sid), session, ttl(options[:expire_after]))
+          sid
         end
       end
 
-      def destroy_session(_env, session_id, options)
+      def delete_session(_req, sid, options)
         with_dalli_client do |dc|
-          dc.delete(memcached_key_from_sid(session_id))
+          dc.delete(memcached_key_from_sid(sid))
           generate_sid_with(dc) unless options[:drop]
         end
-      end
-
-      def find_session(req, sid)
-        get_session(req.env, sid)
-      end
-
-      def write_session(req, sid, session, options)
-        set_session(req.env, sid, session, options)
-      end
-
-      def delete_session(req, sid, options)
-        destroy_session(req.env, sid, options)
       end
 
       private
@@ -134,6 +111,13 @@ module Rack
         loop do
           sid = generate_sid_with(client)
           break sid if client.add(memcached_key_from_sid(sid), {}, @default_ttl)
+        end
+      end
+
+      def generate_sid_with(client)
+        loop do
+          sid = generate_sid
+          break sid unless client.get(sid)
         end
       end
 
@@ -178,13 +162,6 @@ module Rack
         warn "You don't have connection_pool installed in your application. "\
              'Please add it to your Gemfile and run bundle install'
         raise e
-      end
-
-      def generate_sid_with(client)
-        loop do
-          sid = generate_sid
-          break sid unless client.get(sid)
-        end
       end
 
       def with_dalli_client(result_on_error = nil, &block)
