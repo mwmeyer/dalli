@@ -56,14 +56,14 @@ describe Rack::Session::Dalli do
   it 'faults on no connection' do
     assert_raises Dalli::RingError do
       rsd = Rack::Session::Dalli.new(incrementor, memcache_server: 'nosuchserver')
-      rsd.pool.with { |c| c.set('ping', '') }
+      rsd.data.with { |c| c.set('ping', '') }
     end
   end
 
   it 'connects to existing server' do
     assert_silent do
       rsd = Rack::Session::Dalli.new(incrementor, namespace: 'test:rack:session')
-      rsd.pool.with { |c| c.set('ping', '') }
+      rsd.data.with { |c| c.set('ping', '') }
     end
   end
 
@@ -74,8 +74,8 @@ describe Rack::Session::Dalli do
     }
 
     rsd = Rack::Session::Dalli.new(incrementor, opts)
-    assert_equal(opts[:namespace], rsd.pool.with { |c| c.instance_eval { @options[:namespace] } })
-    assert_equal(opts[:compression_min_size], rsd.pool.with { |c| c.instance_eval { @options[:compression_min_size] } })
+    assert_equal(opts[:namespace], rsd.data.with { |c| c.instance_eval { @options[:namespace] } })
+    assert_equal(opts[:compression_min_size], rsd.data.with { |c| c.instance_eval { @options[:compression_min_size] } })
   end
 
   it 'rejects a :cache option' do
@@ -99,8 +99,8 @@ describe Rack::Session::Dalli do
 
     with_connectionpool do
       rsd = Rack::Session::Dalli.new(incrementor, opts)
-      assert_equal 10, rsd.pool.available
-      rsd.pool.with do |mc|
+      assert_equal 10, rsd.data.available
+      rsd.data.with do |mc|
         assert_equal(opts[:namespace], mc.instance_eval { @options[:namespace] })
       end
     end
